@@ -10,7 +10,7 @@
 
 - 목표변수는 데이터 내 변수 중 'Loan Status'를 가공하여 사용.
 
-  ![image-20220823010938119](https://raw.githubusercontent.com/whatsdata/assets/main/img/2022-08/image-20220823010938119.png){: .align-center}
+  ![image-20220823010938119](https://raw.githubusercontent.com/whatsdata/assets/main/img/2022-08/image-20220823010938119.png)
 
 - 해당 변수의 분류 중 ‘Current’. ‘Late’, ‘In Grace Period’ 항목은 아직 채무 상환이 진행중인 대출들로, 채무불이행 여부를 목표로 하는 개인신용평가에서는 적합하지 않다고 판단함.
 - ‘Fully paid’를 0으로, ‘Charged off’를 1로 하는 목표변수를 새로 설정.
@@ -63,7 +63,7 @@
 
 
 
-![image-20220823011748425](https://raw.githubusercontent.com/whatsdata/assets/main/img/2022-08/image-20220823011748425.png){: .align-center}
+![image-20220823011748425](https://raw.githubusercontent.com/whatsdata/assets/main/img/2022-08/image-20220823011748425.png)
 
 
 
