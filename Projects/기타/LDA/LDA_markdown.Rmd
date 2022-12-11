@@ -1,0 +1,381 @@
+---
+title: "LDA_Markdown"
+author: "조인식"
+date: "2022-11-14"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+## 0. 패키지 설치
+
+KoNLP 패키지가 R version > 4.0에서 CRAN을 통해서 설치가 안되고 있습니다. 따른 경로를 통해 설치해야 하는데, 다음 링크를 참고하였습니다. 
+
+
+
+1. 다음 링크를 따라서 KoNLP 설치를 진행합니다. 
+```{r}
+#출처 : https://rdmkyg.blogspot.com/2022/06/r-42-windows-rjava-kolnp.html
+
+#아래 패키지를 설치 하신 후에
+install.packages("multilinguer", repos = "http://cran.us.r-project.org")
+library(multilinguer)
+install_jdk()
+
+# 의존성을 설치 한다. 
+install.packages(c('stringr', 'hash', 'tau', 'Sejong', 'RSQLite', 'devtools'), type = "binary")
+
+# Git hub로 설치 한다. 
+
+install.packages("remotes")
+remotes::install_github('haven-jeon/KoNLP', upgrade = "never", INSTALL_opts=c("--no-multiarch"))
+
+# 불러온다
+library(KoNLP)
+```
+
+2. 위 작업을 해도 에러가 나오는 경우
+
+(출처 : https://countrymouse.tistory.com/entry/r-4)
+
+위의 설치를 진행해도, 
+Fail to locate 'scala-library-2.11.8.jar'. Recommand to locate 'scala-library-2.11.8.jar' manually on 'path' 
+
+라는 에러가 뜨면서 library를 불러올 수 없는 경우가 있다. 
+
+이 경우, https://drive.gumu.kr/sharing/IK7Bkj1lw 링크를 통해서 파일을 다운로드 받고, 위의 'path' 안에 (압축을 풀고) 넣어주면 된다. 
+
+
+3. 나머지 패키지 설치
+
+```{r}
+install.packages('KoNLP')
+install.packages('tm')
+install.packages('stringr')
+install.packages('lda')
+install.packages('topicmodels')
+install.packages('LDAvis')
+install.packages('servr')
+install.packages('ggplot2')
+install.packages('tidyverse')
+install.packages('ldatuning')
+install.packages('wordcloud2')
+install.packages('webshot')
+library(webshot)
+webshot::install_phantomjs()
+```
+
+
+## 1. 패키지, 데이터 불러오기 
+
+1. 패키지 불러오기
+```{r}
+library(lda)
+library(stringr)
+library(tm)
+library(KoNLP)
+library(topicmodels)
+library(LDAvis)
+library(servr)
+library(MASS)
+library(ldatuning)
+library(ggplot2)
+
+library(tidyverse)
+library(lubridate)
+library(dplyr)
+library(wordcloud2)
+library(webshot)
+library(htmlwidgets)
+```
+
+
+2. 데이터 불러오기
+```{r}
+# 데이터 파일이 있는 working directory로 바꾸기 
+setwd('C:/Users/whats/Desktop/r/TopicModelling/data')
+
+# data 불러오기.
+mers <- read.csv('mers_2015.csv')
+
+# 빅카인드 데이터는 키워드를 추출한 결과를 제공하기 때문에 키워드 항목을 사용하였습니다.
+# 상위 50개 추출 항목도 있는데, 키워드 항목이 조금 더 정확하지 않을 까 생각하여서 저는 키워드 열을 사용하였습니다. 
+keyword <- mers['키워드']
+
+```
+
+
+
+## 2. 데이터전처리 
+
+빅카인즈에서 수집한 데이터의 경우 이미 keyword만이 나열되어 있기 때문에 전처리 과정이 간단합니다. 
+앞으로 사용하실 데이터도 빅카인즈 추출 데이터라고 생각하여 해당 방법만을 적어놨습니다.
+
+1. , (반점)을 기준으로 데이터를 리스트로 전환. 
+
+이때 빅카인즈 데이터의 경우 '' (공백)이 키워드로 껴있는 경우가 있어서 공백부분 제거 ,
+'메르스'가 검색 키워드인 만큼 '메르스' 는 키워드에서 제거 
+
+
+
+2.단어별 출현빈도 계산
+
+이때, 총 문서 수가 36,742개에 달하기 때문에 출현 빈도가 100개 이하인 경우 임의로 제거함. 
+
+만일 데이터 수가 적다면 해당 수치를 낮춰야 할 필요가 있음. (2018년은 낮춰서 진행)
+
+3. lda 패키지에 사용될 수 있도록 데이터 변형
+
+```{r}
+
+# 1. , (반점)을 기준으로 데이터를 리스트로 전환. 
+doc.list = sapply(keyword, function(x) strsplit(x, ","))
+doc.list = sapply(doc.list, function(x) x[x!=''])
+doc.list = sapply(doc.list, function(x) x[x!='메르스'])
+
+# 2.단어별 출현빈도 계산
+term.table <- table(unlist(doc.list))
+# 출현 빈도 100 이하 제거
+del <- term.table < 100
+term.table <- term.table[!del]
+# 나타난 단어들의 집합
+vocab <- names(term.table)
+
+# 3. lda 패키지에 사용될 수 있도록 데이터 변형
+get.terms <- function(x) {
+  index <- match(x, vocab)
+  index <- index[!is.na(index)]
+  rbind(as.integer(index - 1), as.integer(rep(1, length(index))))
+}
+
+documents <- lapply(doc.list, get.terms)
+
+```
+
+
+## 3. Latent Dirichlet allocation 
+
+1. 데이터 형태 설정
+```{r}
+D <- length(documents)  # number of documents (36,742)
+W <- length(vocab)  # number of terms in the vocab (5,400)
+doc.length <- sapply(documents, function(x) sum(x[2, ]))  # number of tokens per document [89, 170, 244, 21, 55, 101 , ...]
+N <- sum(doc.length)  # total number of tokens in the data (4,570,921)
+term.frequency <- as.integer(term.table)  # frequencies of terms in the corpus [131, 171, 113, 169, 278, ...]
+```
+
+2. Hypermarameter 설정 및 LDA 훈련
+
+- alpha와 eta
+: LDA 내 gamma function을 정의하는데 사용되는데 hyperparameter로, 조절해야 하는 변수들.
+
+- K
+: 모델 내 Topic의 갯수로, Log-likelihood가 극대화되는 지점이나 Perplexity가 극소화되는 지점을 보통 사용.
+본 분석에서 사용한 LDA 패키지는 Log-likelihood만을 제공하기 때문에 해당 값으로 분석한 결과,  토픽 갯수가 매우 커야 함 (20 이상).
+아무래도 메르스 데이터에 메르스 관련 토픽 외에 여러 토픽이 끼어있는 영향으로 생각됨.
+
+- G
+: 훈련 반복수로, 보통 클 수록 좋음.
+그러나 본 데이터에서는 1000개 정도면 충분히 수렴하는 것으로 보임. 
+
+- Burn-in
+: LDA 분석은 MCMC 방법론을 사용하는데, 해당 방법론은 초깃값의 영향을 많이 받음. 이에 따라 burn-in 만큼의 초기 iteration은 초깃값의 영향을 받는다고 가정하여서 해당 숫자만큼은 버리고 그 이후 반복결과만을 분석에 사용. 
+
+- lda.collapsed.gibbs.sampler
+: R의 LDA 패키지가 제공하는 LDA 함수. 
+
+```{r}
+# Hyperparameter
+
+K <- 5 # topic의 갯수
+G <- 3000 # 훈련 iteration 수 
+alpha <- 0.02 # LDA hyperparameter1
+eta <- 0.02 # LDA hyperparmeter2
+burnin <- 500 # burn-in의 수 
+
+# Fit the model:
+
+set.seed(357)
+t1 <- Sys.time()
+fit <- lda.collapsed.gibbs.sampler(documents = documents, K = K, vocab = vocab, 
+                                   num.iterations = G, alpha = alpha, 
+                                   eta = eta, initial = NULL, burnin = burnin,
+                                   compute.log.likelihood = TRUE)
+t2 <- Sys.time()
+t2 - t1  
+```
+
+
+3. LDAvis를 이용한 시각화
+
+: 제시해주신 논문과는 연관이 있는 시각화는 아니며, 대신 결과를 간략하게 빠르게 확인할 수 있음. 
+아래에 나오는 URL링크를 통해 접속.
+
+```{r}
+# theta <- t(apply(fit$document_sums + alpha, 2, function(x) x/sum(x)))
+# phi <- t(apply(t(fit$topics) + eta, 2, function(x) x/sum(x)))
+# 
+# Mers <- list(phi = phi,
+#                      theta = theta,
+#                      doc.length = doc.length,
+#                      vocab = vocab,
+#                      term.frequency = term.frequency)
+# 
+# json <- createJSON(phi = Mers$phi, 
+#                    theta = Mers$theta, 
+#                    doc.length = Mers$doc.length, 
+#                    vocab = Mers$vocab, 
+#                    term.frequency = Mers$term.frequency)
+# 
+# serVis(json, open.browser = TRUE, out.dir = 'vis')
+```
+
+4. News가 어느 Topic에 속하는지 계산
+
+LDA 패키지가 따로 각 뉴스가 어떤 토픽에 속하는지를 제시해주지는 않아서, 모든 뉴스에 대해서 토픽을 계산하여 제시함.
+
+```{r}
+most <- function(x){
+  tab <- table(x)
+  names(tab[which.max(tab)])
+}
+                              
+documents.topics <- sapply(fit$assignments, most)
+
+# 뉴스기사 중에서 극히 짧은 기사의 경우 분류가 아예 이루어지지 않는 경우가 있음. 이 경우 topic -1(토픽 없음)으로 배정
+fill_na <- function(x){
+  if (isTRUE(lengths(x) == 0)){
+    list(-1)
+  } else{x}}
+
+for (i in seq(length(documents.topics))){
+  documents.topics[i] = fill_na(documents.topics[i])
+}
+documents.topics <- unlist(documents.topics)
+
+# lda 패키지가 topic을 0부터 시작하므로 가시성을 위해 1씩 더함 
+documents.topics <- as.character(as.numeric(documents.topics) +1 )
+```
+
+5. 시각화 
+
+보여주신 논문에 있는 그래프와 유사한 그래프 생성을 위한 코드.
+
+- 시각화를 위한 데이터프레임 생성
+
+: 그래프에 필요한 정보가 날짜, 제목, 토픽이므로 이들을 포함한 데이터프레임 형성.
+
+```{r}
+mers.date = lapply(mers['일자'], function(x) ymd(x))
+mers.final <- data.frame('일자' = mers.date,
+                         '제목' = mers['제목'],
+                         '토픽' = documents.topics
+                      )
+
+# 앞서 언급한 것처럼 토픽이 분류되지 않은 뉴스들은 제거함.
+mers.final <- mers.final[mers.final['토픽']!= '0',]
+```
+
+
+- ggplot을 이용한 시각화
+
+```{r}
+# 일자 및 토픽별 누적 뉴스 수를 계산
+mers.numbers <- mers.final %>% 
+  group_by(일자, 토픽) %>%
+             summarise(number=sum(n())) %>%
+  group_by(토픽)%>%
+             mutate(number = cumsum(number))
+
+# 그래프 시각화
+p = ggplot(mers.numbers, aes(일자, number))+
+  geom_line(aes(color = 토픽))+
+  scale_x_date(breaks = '1 weeks') + 
+  theme(axis.text.x = element_text(angle = 30,  hjust=1))+
+  geom_text(aes(label = scales::number(number, big.mark = ',', accuracy = 1)), check_overlap = TRUE)
+
+```
+
+
+
+
+6. 표에 필요한 정보들 저장
+
+: 제시해주신 논문에 나와 있는 표에 필요한 데이터들을 저장. 
+
+```{r}
+E = 10 # words 추출 개수
+top.words <- data.frame(top.topic.words(fit$topics, E, by.score = FALSE)) # 상위 E개의 words를 저장
+top.documents <- top.topic.documents(fit$document_sums, num.documents = 100) # 토픽별 가장 연관성이 높은 뉴스 100개를 저장.
+
+# 단어별 등장 비율 계싼
+proportion <- data.frame(matrix(nrow = E, ncol = K))
+for (i in seq(E)){
+  for (j in seq(K)){
+    proportion[i,j] =  fit$topics[j,top.words[i,j]]/fit$topic_sums[j]
+  }
+}
+
+# 주요 단어, 등장비율, 뉴스를 하나의 data frame으로 결합.
+documents.df <- data.frame(mers['제목'][top.documents[,1],])
+for (i in seq(2,K)){
+  documents.df <- cbind(documents.df, mers['제목'][top.documents[,i],]) 
+}
+names(proportion) <- names(top.words)
+names(documents.df) <- names(top.words)
+top.words <- rbind(top.words ,proportion, documents.df)
+```
+
+
+
+7. 표 및 그래프 저장 
+
+- plot_by_year : 논문에 나와있는 그래프
+- mers_final.csv : 뉴스 및 뉴스 별 토픽
+- mers_word.csv : 논문 내 표에 필요한 정보들
+
+```{r}
+# 저장될 directory 설정
+setwd(sprintf('C:/Users/whats/Desktop/r/TopicModelling/result_2015/topic%s',K ))
+ggsave(file="plot_by_year.jpg", plot = p, width=35, height=20, units=c("cm"))
+write.csv(mers.final,file="mers_final.csv", fileEncoding = 'cp949')
+write.csv(top.words,file="mers_words.csv", fileEncoding = 'cp949')
+```
+
+
+8. 워드클라우드 저장
+
+: R에 대표적인 워드클라우드 패키지로 wordcloud와 wordcloud2 두 종류가 있는데, 
+wordcloud의 경우 한글을 지원을 안하는 경우가 있음.
+이에따라 wordcloud2 사용. 
+
+```{r}
+
+Nwords = 100 # 하나의 워드클라우드에 들어간 단어의 수 
+tops <- data.frame(top.topic.words(fit$topics, Nwords, by.score = FALSE)) # Nwords만큼의 단어 추출
+
+# 해당 단어들의 등장빈도 
+frequency <- data.frame(matrix(nrow = Nwords, ncol = K)) 
+for (i in seq(Nwords)){
+  for (j in seq(K)){
+    frequency[i,j] =  fit$topics[j,tops[i,j]]
+  }
+}
+
+# topic 별 워드클라우드를 저장
+for (i in seq(K)){
+  cloud <- data.frame(tops[,i] ,frequency[,i])
+  imgfile <- wordcloud2(data = cloud,
+                        size = 1
+  )        
+  saveWidget(imgfile, "tmp.html", selfcontained = F)
+  
+  webshot("tmp.html", sprintf('wordcloudTopic%s.png', i), delay = 5, vwidth = 1500, vheight = 1000  )
+}
+
+file.remove('tmp.html')
+unlink("tmp_files", recursive = TRUE)
+
+```
+
+
